@@ -1,0 +1,221 @@
+---
+title: "SDS 264 Mini-project 1"
+author: "Cole Willardson"
+date: today
+format:
+  pdf:
+    code-overflow: wrap
+    number-sections: false
+    fig-width: 5
+    fig-height: 3.5
+    geometry:
+      - margin=1in
+    warning: false
+    message: false
+---
+
+For this project, I apply text frequency and sentiment analysis to Warren Buffett's letters to shareholders from 1977 to 2024. Buffett's is considered the "Oracle of Omaha," and his annual letters hold weight to investors. He only recently stepped down as chairman of Berkshire Hathaway this year, at the age of 96. Over time, these letters offer insights on Buffett's thinking. As a result, the letters offer an interesting data set to analyze. My analysis focuses on two main areas. First, sentiment, and second, "Buffettisms." In the second category, I review accounting terms, market stress terms, classic terms, and the word count over time.
+
+These letters are publicly available on the [Berkshire Hathaway Inc website](https://www.berkshirehathaway.com/letters/letters.html). They were sent to owners of Berkshire Hathaway stock from 1965 to 2024, but letters from 1965-1976 are only available through the compilation book of Buffett's letters available for purchase on the Berkshire Hathaway website. They are a glimpse into Buffett's worldview and typically contain a performance comparison to benchmarks like the S&P 500, a review of business conditions, recent investments, and Buffett's personal statements on the economy, markets, accounting rules, etc. They all end with an invitation to the Berkshire Hathaway annual shareholders' meeting in Omaha.
+
+To obtain the text, I went to the [Berkshire Hathaway Inc website](https://www.berkshirehathaway.com/letters/letters.html) and copy pasted each letter to a txt file in my R Server. Because some of these letters contained an appendix, I only used text from Buffett's introduction: "To the stockholders of Berkshire Hathaway Inc", to his ending: "Warren E. Buffett (Date of publication) Chairman of the Board." After loading the text files into RStudio, I read in the text files into a tibble and began to clean the data.
+
+Because there are tables and figures in Buffett's letters, I removed any kind of punctuation, symbols, and numbers from the data. This allows me to best understand the sentiment and word frequency. I also mutated the text to be in all lowercase for consistency. Finally, I removed excess white space created by removing symbols and punctuation.
+
+```{r load data and libs}
+
+library(tidyverse)
+library(tidytext)
+library(fs)
+
+# sets path for file locations
+file_path <- "/Users/colewillardson/CDWTesting/Data_Sci_264/Mini_proj_1/Letters" 
+
+
+# Read every .txt file in the folder into one tibble
+letters_raw <- tibble(
+  path = dir_ls(file_path, type = "file")
+) |>
+  mutate(
+    filename = path_ext_remove(path_file(path)),
+    year     = as.integer(str_extract(filename, "\\d{4}")),
+    text     = map_chr(path, read_file)
+  ) |>
+  select(year, filename, text)
+```
+
+```{r clean and wrangle data, message = FALSE, warning = FALSE}
+
+smart_stopwords <- get_stopwords(source = "smart")
+
+
+Clean_Buffett_Letters <-
+  letters_raw |>
+  mutate(
+  text = str_to_lower(text),
+  text = str_remove_all(text, "[\\p{P}\\p{S}]"), #removes punctuation and symbols
+  text = str_remove_all(text, "[\\d*]"), #removes numbers
+  text = str_squish(text))  #removes extra whitespace
+
+clean_tokens <-
+  Clean_Buffett_Letters |>
+  unnest_tokens(word, text) |>   # (new name, input)
+  anti_join(smart_stopwords) |>
+  count(year, word)
+
+write_csv(Clean_Buffett_Letters, "Clean_Buffett_Letters.csv")
+ 
+
+```
+
+After the data was cleaned, I tokenized the clean data to apply sentiment analysis to it. Below, I used the AFINN sentiment dictionary to assign a -5 to 5 sentiment level (where -5 is highly negative, 0 is neutral, and 5 is highly positive) to each word token. To account for word count variation, I took the sum of all the AFINN values, divided them by the word count, and multiplied by 100 to find the average AFINN score per 100 words in the letter. This gives an overall sentiment score for each letter in the data set.
+
+```{r sentiment, message = FALSE, warning = FALSE}
+library(tidytext)
+
+
+afinn_scores <- clean_tokens |>
+  inner_join(get_sentiments("afinn"), by = "word") |>
+  group_by(year) |>
+  summarize(afinn_total = sum(value * n), .groups = "drop") |>
+  left_join(year_totals, by = "year") |>
+  mutate(afinn_per100 = afinn_total / total_words * 100)
+
+
+
+ggplot(afinn_scores, aes(x = year, y = afinn_per100)) +
+  geom_line() +
+  geom_point() +
+  labs(
+    title = "AFINN Sentiment of Berkshire Letters by Year",
+    x = "Year",
+    y = "AFINN score per 100 words"
+  ) +
+  theme_light()
+```
+
+After graphing the sentiment over time, there were some interesting conclusions. First, in all of the letters, the prevailing sentiment is positive. Although Buffett is known for his honesty and lack of "spin" in his letters, it makes sense that he would want to keep his letters to Berkshire Hathaway shareholders generally positive. There were a couple low points in this plot that are notable: 2001 and 2008, which contain recession periods. This makes sense as these were two highly difficult years for the U.S. and its economy so Buffett used less positive terminology in his letters. Following this logic though, it's odd that 2020-21 has such a positive sentiment. This is likely because of the quick rebound in the economy during the Covid-19 pandemic compared to the slower rebounds in 2001 and 2008. Additionally, the average sentiment of the 2020 letter might be slightly skewed due to the significantly lower word count in that letter compared to others. (word count graph shown below)
+
+Next, I conducted frequency analysis on the words in each letter to gain some knowledge on some classic "Buffettisms." To do this, I went back to the clean letters tibble and using regular expressions, I searched for specific words or terms that Buffett is known for using. I categorized these terms into four groups: accounting terms, business terms, market stress terms, and Buffett classics.
+
+```{r term counts, message = FALSE, warning = FALSE}
+#Here, I lay out the words/patterns that I am looking for. 
+#I write the regex with \\b so that I don't accidentally pick up
+#extra words that I didn't mean to.
+
+term_counts <- 
+  Clean_Buffett_Letters |> 
+    mutate(
+      n_words = str_count(text, "\\S+"),
+      gaap = str_count(text, "\\bgaap\\b"),
+      luck = str_count(text, "\\blucky?\\b"),
+      ebitda = str_count(text, "\\bebitda\\b"),
+      intrinsic_value = str_count(text, "intrinsic[ -]value"),
+      inflation = str_count(text, "\\binflation\\b"),
+      derivatives = str_count(text, "\\bderivatives?\\b"),
+      charlie_munger  = str_count(text, "\\b(charlie|munger)\\b")
+  ) |>
+  select(year, n_words, gaap:charlie_munger) |>
+  pivot_longer(gaap:charlie_munger, names_to = "term", values_to = "n")
+```
+
+```{r load graphs}
+#accounting terms
+Accounting_Terms <-
+  term_counts|>
+  filter(term %in% c("ebitda", "gaap")) |>
+    ggplot(aes(x = year, y = n, color = term)) +
+      geom_line() +
+      geom_point() +
+  scale_color_brewer(
+  palette = "Dark2",
+  breaks = c("gaap", "ebitda"),
+  labels = c("GAAP", "EBITDA")
+) +
+  labs(
+    title = "Accounting Terms Over Time",
+    x = "Year",
+    y = "Term Frequency",
+    color = "Term"
+  ) +
+  theme_light()
+
+#Buffett classics
+Buffett_Classics <-
+  term_counts|>
+  filter(term %in% c("charlie_munger", "intrinsic_value", "luck")) |>
+    ggplot(aes(x = year, y = n, color = term)) +
+      geom_line() +
+      geom_point() +
+  scale_color_brewer(
+  palette = "Dark2",
+  breaks = c("charlie_munger", "intrinsic_value", "luck"),
+  labels = c("Charlie Munger", "Intrinsic Value", "Luck")) +
+  labs(
+    title = "Classic Buffett Terms Over Time",
+    x = "Year",
+    y = "Term Frequency",
+    color = "Term"
+  )+
+  theme_light()
+
+
+#Word Count
+Word_Count <-
+  term_counts|>
+    ggplot(aes(x = year, y = n_words)) +
+     geom_line() +
+     geom_point() +
+  labs(
+    title = "Word Count Over Time",
+    x = "Year",
+    y = "Word Count"
+  )+
+  theme_light()
+
+
+#Market Stress
+Market_Stress <-
+  term_counts|>
+    filter(term %in% c("inflation", "derivatives")) |>
+    ggplot(aes(x = year, y = n, color = term)) +
+      geom_line() +
+      geom_point() +
+  scale_color_brewer(
+  palette = "Dark2",
+  breaks = c("derivatives", "inflation"),
+  labels = c("Derivatives", "Inflation")) +
+  labs(
+    alt = "Line chart measuring the frequency of mentions of derivatives and inflation in Warren Buffetts letters to shareholders from 1977 to 2024. Derivatives mentions remain fairly constant but with large peaks in 2002 and 2008 while inflation mentions have a hump at the beginning, from 1980 to 1990 and remain fairly constant after that.",
+    title = "Market Stress Terms Over Time",
+    x = "Year",
+    y = "Term Frequency",
+    color = "Term"
+  ) +
+  theme_light()
+
+```
+
+Beginning with accounting terms, I highlight GAAP (Generally Accepted Accounting Principals) and EBITDA (Earnings Before Interest, Taxes, Depreciation, and Amortization). Buffett is well known for his issues with GAAP and EBITDA. Below, we see that GAAP is mentioned more frequently after there have been updates to GAAP policy, particularly ones that Buffett found illogical. We see this specifically in the 1988 and 2016 letters. In 1988, Buffett discussed a pending rule change targeting the calculation of deferred taxes on unrealized capital gains. In 2016, Buffett objected to a rule requiring companies to report unrealized and realized gains and losses on their income statement. In both of these instances, Buffett objected because these rules assumed that businesses buy stock to later sell it, but Berkshire typically bought stock to hold onto it for it's future cash flows. We don't see many occurrences of EBITDA, but Buffett's views on that are well documented from his [annual shareholders meetings](https://www.youtube.com/watch?v=UdFOXMCdooE).
+
+```{r}
+Accounting_Terms
+```
+
+Inflation and derivatives fall under the market stress category. Inflation is the growth rate of prices, and derivatives are complex financial instruments that Buffett often critiqued. In this graph below, derivatives have a large peak in 2002 and 2008, and inflation has a hump at the beginning that gradually dies out. In 2002, Buffett warned about derivatives in his letter. Specifically, he called them "financial weapons of mass destruction." This was because of their danger to the financial system as a whole due to the web of dealers holding highly concentrated derivatives. Later, in 2008, he would be proven right as the housing bubble popped and derivatives hastened the downfall of the economy.
+
+```{r}
+Market_Stress #contains alt text
+```
+
+There are a few words or phrases that Buffett frequently used. First are references to his best friend at Berkshire, Charlie Munger. Munger has worked with Buffett for most of the Buffett's leadership of Berkshire and is credited with being the "architect" of the company. Buffett also loves the idea of intrinsic value. This is what Berkshire was built on, investing in companies based on the true underlying worth of a business, due to the cash it generates. For this reason, I reviewed intrinsic value and its frequency. Lastly, Buffett often discussed luck. He is well known for crediting his success to part skill and part luck. Specifically, how he was lucky to be a healthy male born in the U.S., a significant factor in his success.
+
+In the graph below, references to Charlie Munger generally follow Buffett's word count patterns. So as Buffett writes more, we expect him to mention Munger more. The intrinsic value line has frequent spikes over time, particularly before the dot-com bubble in 2001, with smaller humps later. These spikes are comprised of discussion on book to market value and how it doesn't tell the whole investment story, highlighting Buffett's buy and hold strategy. Lastly, luck has a fairly persistent and constant appearance in Buffett's writing over time, this tells us how consistent Buffett is in his success analysis.
+
+```{r}
+Buffett_Classics
+
+Word_Count
+```
+
+In conclusion, from this analysis, Buffett's letters read as consistently positive, but not without their fluctuations as shown in 2001 and 2008. The word frequency results show peaks that follow Buffett's particular interests on market conditions and developments like GAAP changes and the financial environment. In comparison, general terms stay relatively consistent like Charlie Munger, intrinsic value, and luck. There are limits to this study, particularly the AFINN dictionary as it might misread financial language as an incorrect negative or positive sentiment. The next steps would be to expand the keywords of interest and look at sentiments around specific terms like GAAP and around specific time frames like 2001 and 2008.
