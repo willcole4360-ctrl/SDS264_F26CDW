@@ -48,7 +48,6 @@ letters_raw <- tibble(
 
 smart_stopwords <- get_stopwords(source = "smart")
 
-
 Clean_Buffett_Letters <-
   letters_raw |>
   mutate(
@@ -62,6 +61,10 @@ clean_tokens <-
   unnest_tokens(word, text) |>   # (new name, input)
   anti_join(smart_stopwords) |>
   count(year, word)
+
+year_totals <- clean_tokens |>
+  group_by(year) |>
+  summarize(total_words = sum(n), .groups = "drop")
 
 write_csv(Clean_Buffett_Letters, "Clean_Buffett_Letters.csv")
  
