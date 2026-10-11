@@ -1,18 +1,19 @@
 ---
 title: "SDS 264 Mini-project 1"
 author: "Cole Willardson"
-date: today
-format:
-  pdf:
-    code-overflow: wrap
-    number-sections: false
-    fig-width: 5
-    fig-height: 3.5
-    geometry:
-      - margin=1in
-    warning: false
-    message: false
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    fig_width: 5
+    fig_height: 3.5
+    number_sections: false
+    extra_dependencies: ["fvextra"]
+geometry: margin=1in
 ---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
 
 For this project, I apply text frequency and sentiment analysis to Warren Buffett's letters to shareholders from 1977 to 2024. Buffett's is considered the "Oracle of Omaha," and his annual letters hold weight to investors. He only recently stepped down as chairman of Berkshire Hathaway this year, at the age of 96. Over time, these letters offer insights on Buffett's thinking. As a result, the letters offer an interesting data set to analyze. My analysis focuses on two main areas. First, sentiment, and second, "Buffettisms." In the second category, I review accounting terms, market stress terms, classic terms, and the word count over time.
 
@@ -48,7 +49,6 @@ letters_raw <- tibble(
 
 smart_stopwords <- get_stopwords(source = "smart")
 
-
 Clean_Buffett_Letters <-
   letters_raw |>
   mutate(
@@ -62,6 +62,10 @@ clean_tokens <-
   unnest_tokens(word, text) |>   # (new name, input)
   anti_join(smart_stopwords) |>
   count(year, word)
+
+year_totals <- clean_tokens |>
+  group_by(year) |>
+  summarize(total_words = sum(n), .groups = "drop")
 
 write_csv(Clean_Buffett_Letters, "Clean_Buffett_Letters.csv")
  
@@ -219,4 +223,3 @@ Word_Count
 ```
 
 In conclusion, from this analysis, Buffett's letters read as consistently positive, but not without their fluctuations as shown in 2001 and 2008. The word frequency results show peaks that follow Buffett's particular interests on market conditions and developments like GAAP changes and the financial environment. In comparison, general terms stay relatively consistent like Charlie Munger, intrinsic value, and luck. There are limits to this study, particularly the AFINN dictionary as it might misread financial language as an incorrect negative or positive sentiment. The next steps would be to expand the keywords of interest and look at sentiments around specific terms like GAAP and around specific time frames like 2001 and 2008.
-
